@@ -1,10 +1,10 @@
 import random
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from typing import List
+from typing import List, Optional
 from app.core.database import get_db
 from app.core.security import get_current_user, require_teacher
-from app.models.models import DeThi, CauHoiDeThi, CauHoi, LanThi
+from app.models.models import DeThi, CauHoiDeThi, CauHoi, LuaChon, LanThi
 from app.schemas.schemas import DeThiCreate, DeThiAutoCreate, DeThiResponse
 
 router = APIRouter(prefix="/exams", tags=["Đề thi"])
@@ -49,6 +49,7 @@ def tao_de_thi(payload: DeThiCreate, db: Session = Depends(get_db), current_user
 
 @router.post("/auto-generate", response_model=DeThiResponse, status_code=201, summary="Tự động sinh đề thi")
 def tu_dong_sinh_de_thi(payload: DeThiAutoCreate, db: Session = Depends(get_db), current_user=Depends(require_teacher)):
+    # Lấy danh sách câu hỏi theo chủ đề và độ khó
     query = db.query(CauHoi).filter(CauHoi.chu_de_id == payload.chu_de_id, CauHoi.an_hien == True)
     if payload.do_kho:
         query = query.filter(CauHoi.do_kho == payload.do_kho)
@@ -96,6 +97,42 @@ def xem_de_thi(exam_id: int, db: Session = Depends(get_db), current_user=Depends
     return de_thi
 
 
+@router.get("/{exam_id}/details", summary="Lấy chi tiết đề thi kèm danh sách câu hỏi và đáp án")
+def chi_tiet_de_thi(exam_id: int, db: Session = Depends(get_db), current_user=Depends(require_teacher)):
+    de_thi = db.query(DeThi).filter(DeThi.id == exam_id).first()
+    if not de_thi:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đề thi")
+    
+    cau_hoi_list = (
+        db.query(CauHoiDeThi)
+        .filter(CauHoiDeThi.de_thi_id == exam_id)
+        .order_by(CauHoiDeThi.thu_tu)
+        .all()
+    )
+    result = {
+        "id": de_thi.id,
+        "tieu_de": de_thi.tieu_de,
+        "mo_ta": de_thi.mo_ta,
+        "thoi_gian_lam_bai": de_thi.thoi_gian_lam_bai,
+        "diem_dat": de_thi.diem_dat,
+        "cong_bo": de_thi.cong_bo,
+        "cau_hoi": []
+    }
+    for item in cau_hoi_list:
+        cau_hoi = db.query(CauHoi).options(joinedload(CauHoi.lua_chon)).filter(CauHoi.id == item.cau_hoi_id).first()
+        if cau_hoi:
+            result["cau_hoi"].append({
+                "id": cau_hoi.id,
+                "noi_dung": cau_hoi.noi_dung,
+                "loai_cau_hoi": cau_hoi.loai_cau_hoi,
+                "do_kho": cau_hoi.do_kho,
+                "thu_tu": item.thu_tu,
+                "diem_so": item.diem_so,
+                "lua_chon": [{"id": lc.id, "noi_dung": lc.noi_dung, "la_dap_an": lc.la_dap_an} for lc in cau_hoi.lua_chon]
+            })
+    return result
+
+
 @router.post("/{exam_id}/publish", response_model=DeThiResponse, summary="Công bố / Gỡ công bố đề thi")
 def cong_bo_de_thi(exam_id: int, db: Session = Depends(get_db), current_user=Depends(require_teacher)):
     de_thi = db.query(DeThi).filter(DeThi.id == exam_id).first()
@@ -116,11 +153,8 @@ def xoa_de_thi(exam_id: int, db: Session = Depends(get_db), current_user=Depends
         raise HTTPException(status_code=404, detail="Không tìm thấy đề thi")
     if de_thi.nguoi_tao_id != current_user.id and current_user.vai_tro != "admin":
         raise HTTPException(status_code=403, detail="Không có quyền xóa đề thi này")
-    
-    # Xóa các lần thi liên quan (foreign key constraint)
+    # Xóa các lần thi liên quan
     db.query(LanThi).filter(LanThi.de_thi_id == exam_id).delete()
-    # Xóa các câu hỏi trong đề thi
     db.query(CauHoiDeThi).filter(CauHoiDeThi.de_thi_id == exam_id).delete()
-    # Xóa đề thi
     db.delete(de_thi)
     db.commit()

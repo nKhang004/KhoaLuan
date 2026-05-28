@@ -71,6 +71,7 @@ const deleteQuestion = (id) => apiCall('DELETE', `/questions/${id}`);
 // Đề thi
 const getExams = () => apiCall('GET', '/exams');
 const getExam = (id) => apiCall('GET', `/exams/${id}`);
+const getExamDetails = (id) => apiCall('GET', `/exams/${id}/details`);
 const createExam = (d) => apiCall('POST', '/exams', d);
 const autoGenerateExam = (d) => apiCall('POST', '/exams/auto-generate', d);
 const publishExam = (id) => apiCall('POST', `/exams/${id}/publish`);
@@ -129,18 +130,29 @@ async function importUsersExcel(file) {
 }
 
 // Xuất & Import câu hỏi
-async function downloadWithAuth(endpoint) {
-  const res = await fetch(`${API_BASE}/${endpoint}`, {
-    headers: { 'Authorization': `Bearer ${getToken()}` }
-  });
-  if (!res.ok) { alert('Không xuất được file.'); return; }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const cd = res.headers.get('Content-Disposition') || '';
-  const name = cd.match(/filename\*?=(?:UTF-8'')?([^;]+)/)?.[1]?.replace(/"/g, '') || 'export.xlsx';
-  a.href = url; a.download = decodeURIComponent(name);
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
+async function downloadWithAuth(endpoint, defaultName = 'export.xlsx') {
+  try {
+    const res = await fetch(`${API_BASE}/${endpoint}`, {
+      headers: { 'Authorization': `Bearer ${getToken()}` }
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Lỗi xuất file');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const cd = res.headers.get('Content-Disposition') || '';
+    let filename = defaultName;
+    const match = cd.match(/filename\*?=(?:UTF-8'')?([^;]+)/);
+    if (match) {
+      filename = decodeURIComponent(match[1].replace(/"/g, ''));
+    }
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Không xuất được file: ' + err.message);
+  }
 }
 const downloadTemplate = () => `${API_BASE}/import/template/excel`;

@@ -35,7 +35,7 @@ def style_cell(cell, value="", align=LEFT):
 
 
 @router.get("/exam/{exam_id}/excel", summary="Xuất đề thi ra Excel")
-def xuat_de_thi_excel(exam_id: int, db: Session = Depends(get_db), _=Depends(require_teacher)):
+def xuat_de_thi_excel(exam_id: int, db: Session = Depends(get_db), current_user=Depends(require_teacher)):
     de_thi = db.query(DeThi).filter(DeThi.id == exam_id).first()
     if not de_thi:
         raise HTTPException(status_code=404, detail="Không tìm thấy đề thi")
@@ -133,7 +133,7 @@ def xuat_de_thi_excel(exam_id: int, db: Session = Depends(get_db), _=Depends(req
 
 
 @router.get("/exam/{exam_id}/results/excel", summary="Xuất kết quả thi ra Excel")
-def xuat_ket_qua_excel(exam_id: int, db: Session = Depends(get_db), _=Depends(require_teacher)):
+def xuat_ket_qua_excel(exam_id: int, db: Session = Depends(get_db), current_user=Depends(require_teacher)):
     de_thi = db.query(DeThi).filter(DeThi.id == exam_id).first()
     if not de_thi:
         raise HTTPException(status_code=404, detail="Không tìm thấy đề thi")

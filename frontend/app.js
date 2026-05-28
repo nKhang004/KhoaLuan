@@ -1,7 +1,8 @@
-/* app.js – Phiên bản hoàn chỉnh, đã sửa lỗi nút xóa đề thi và phân quyền */
+/* app.js – Hoàn chỉnh, sửa lỗi hiển thị bảng và các nút */
 
 let currentUser = null;
 let currentPage = 'dashboard';
+let tempQuestionList = [];
 
 // ── KHỞI ĐỘNG ────────────────────────────────────────────────────────────────
 (async function init() {
@@ -129,7 +130,7 @@ async function renderDashboard() {
       <td>${role !== 'hoc_sinh'
         ? `<button class="btn btn-sm btn-outline" onclick="navigateTo('exams')">Xem</button>`
         : e.cong_bo ? `<button class="btn btn-sm btn-primary" onclick="startQuiz(${e.id})">Làm bài</button>` : ''}</td>
-    </tr>`).join('');
+    <tr>`).join('');
 
     setBody(`${statsHtml}
       <div class="card">
@@ -430,7 +431,7 @@ async function showResult(result, auto = false) {
     </div>`);
 }
 
-// ── MÔN HỌC & CHỦ ĐỀ (ĐÃ SỬA LỖI HIỂN THỊ) ─────────────────────────────────
+// ── MÔN HỌC & CHỦ ĐỀ ────────────────────────────────────────────────────────
 async function renderSubjects() {
   loading();
   const [subjects, topics] = await Promise.all([getSubjects(), getTopics()]);
@@ -476,7 +477,7 @@ async function renderSubjects() {
         <div class="table-responsive">
           <table class="table">
             <thead>
-              <tr><th>Tên chủ đề</th><th>Môn</th><th>Mô tả</th></tr>
+              <tr><th>Tên chủ đề</th><th>Môn</th><th>Mô tả</th><tr>
             </thead>
             <tbody>${topicRows || '<tr><td colspan="3" class="text-center text-muted">Trống</td>'}</tbody>
           </table>
@@ -526,65 +527,88 @@ async function deleteSubjectAction(id) {
   await deleteSubject(id); renderSubjects();
 }
 
-// ── NGÂN HÀNG CÂU HỎI ────────────────────────────────────────────────────────
+// ── NGÂN HÀNG CÂU HỎI (SỬA LỖI HIỂN THỊ BẢNG) ──────────────────────────────
 let questionFilters = {};
+let allTopicsCache = [];
+
 async function renderQuestions() {
   loading();
-  const [subjects, topics, questions] = await Promise.all([
-    getSubjects(), getTopics(), getQuestions(questionFilters)
+  const [subjects, allTopics, questions] = await Promise.all([
+    getSubjects(),
+    getTopics(),
+    getQuestions(questionFilters)
   ]);
+  allTopicsCache = allTopics;
+
+  const sOpts = `<option value="">-- Tất cả môn --</option>` + subjects.map(s => `<option value="${s.id}" ${questionFilters.mon_hoc_id == s.id ? 'selected' : ''}>${s.ten_mon}</option>`).join('');
+
+  let filteredTopics = [];
+  if (questionFilters.mon_hoc_id) {
+    filteredTopics = allTopicsCache.filter(t => t.mon_hoc_id == questionFilters.mon_hoc_id);
+  } else {
+    filteredTopics = allTopicsCache;
+  }
+  const tOpts = `<option value="">-- Tất cả chủ đề --</option>` + filteredTopics.map(t => `<option value="${t.id}" ${questionFilters.chu_de_id == t.id ? 'selected' : ''}>${t.ten_chu_de}</option>`).join('');
 
   const diffMap = { de: ['Dễ', 'badge-green'], trung_binh: ['Trung bình', 'badge-yellow'], kho: ['Khó', 'badge-red'] };
   const typeMap = { trac_nghiem_mot_dap_an: 'TN 1 đáp án', trac_nghiem_nhieu_dap_an: 'TN nhiều đáp án', dung_sai: 'Đúng/Sai' };
 
-  const sOpts = `<option value="">-- Tất cả môn --</option>` + subjects.map(s => `<option value="${s.id}" ${questionFilters.mon_hoc_id == s.id ? 'selected' : ''}>${s.ten_mon}</option>`).join('');
-  const tOpts = `<option value="">-- Tất cả chủ đề --</option>` + topics.map(t => `<option value="${t.id}" ${questionFilters.chu_de_id == t.id ? 'selected' : ''}>${t.ten_chu_de}</option>`).join('');
+  let rowsHtml = '';
+  if (questions.length === 0) {
+    rowsHtml = '<tr><td colspan="5" class="text-center">Không có câu hỏi nào</td></tr>';
+  } else {
+    rowsHtml = questions.map(q => {
+      const [dl, dc] = diffMap[q.do_kho] || ['?', 'badge-gray'];
+      const loai = typeMap[q.loai_cau_hoi] || q.loai_cau_hoi;
+      const soDapAn = q.lua_chon ? q.lua_chon.length : 0;
+      return `<tr>
+        <td style="word-break:break-word; max-width:400px;">${q.noi_dung}</td>
+        <td class="text-center">${loai}</td>
+        <td class="text-center"><span class="badge ${dc}">${dl}</span></td>
+        <td class="text-center">${soDapAn}</td>
+        <td class="text-center">
+          <button class="btn btn-sm btn-danger" onclick="deleteQuestionAction(${q.id})" title="Xóa câu hỏi">🗑</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
 
-  const rows = questions.map(q => {
-    const [dl, dc] = diffMap[q.do_kho] || ['?', 'badge-gray'];
-    return `<tr>
-      <td style="max-width:320px;word-break:break-word">${q.noi_dung}</td>
-      <td>${typeMap[q.loai_cau_hoi] || q.loai_cau_hoi}</td>
-      <td><span class="badge ${dc}">${dl}</span></td>
-      <td>${q.lua_chon.length}</td>
-      <td style="text-align:center">
-        <button class="btn btn-sm btn-danger" onclick="deleteQuestionAction(${q.id})" title="Xóa câu hỏi">🗑</button>
-      </td>
-    </tr>`;
-  }).join('');
-
-  setBody(`<div class="card">
-    <div class="card-header">
-      <h3>❓ Câu hỏi (${questions.length})</h3>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-sm btn-outline" onclick="showImportModal()">📥 Import Excel</button>
-        <button class="btn btn-sm btn-primary" onclick="showAddQuestionModal(${JSON.stringify(topics).replace(/"/g, '&quot;')})">+ Thêm câu hỏi</button>
+  setBody(`
+    <div class="card">
+      <div class="card-header">
+        <h3>❓ Câu hỏi (${questions.length})</h3>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-outline" onclick="showImportModal()">📥 Import Excel</button>
+          <button class="btn btn-sm btn-primary" onclick="showAddQuestionModal(${JSON.stringify(allTopicsCache).replace(/"/g, '&quot;')})">+ Thêm câu hỏi</button>
+        </div>
+      </div>
+      <div class="card-body" style="padding-bottom:0">
+        <div class="filter-bar">
+          <input placeholder="🔍 Tìm theo nội dung..." value="${questionFilters.tu_khoa || ''}"
+            onchange="questionFilters.tu_khoa=this.value;renderQuestions()" style="min-width:200px">
+          <select id="filter-mon-hoc" onchange="questionFilters.mon_hoc_id=this.value; questionFilters.chu_de_id=''; renderQuestions();">${sOpts}</select>
+          <select id="filter-chu-de" onchange="questionFilters.chu_de_id=this.value; renderQuestions();">${tOpts}</select>
+          <select onchange="questionFilters.do_kho=this.value;renderQuestions()">
+            <option value="">-- Độ khó --</option>
+            <option value="de" ${questionFilters.do_kho === 'de' ? 'selected' : ''}>Dễ</option>
+            <option value="trung_binh" ${questionFilters.do_kho === 'trung_binh' ? 'selected' : ''}>Trung bình</option>
+            <option value="kho" ${questionFilters.do_kho === 'kho' ? 'selected' : ''}>Khó</option>
+          </select>
+          <button class="btn btn-sm btn-outline" onclick="questionFilters={};renderQuestions()">↺ Xóa lọc</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-bordered table-striped">
+          <thead>
+            <tr><th>Nội dung câu hỏi</th><th>Loại</th><th>Độ khó</th><th>Số đáp án</th><th>Thao tác</th></tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
       </div>
     </div>
-    <div class="card-body" style="padding-bottom:0">
-      <div class="filter-bar">
-        <input placeholder="🔍 Tìm theo nội dung..." value="${questionFilters.tu_khoa || ''}"
-          onchange="questionFilters.tu_khoa=this.value;renderQuestions()" style="min-width:200px">
-        <select onchange="questionFilters.mon_hoc_id=this.value;questionFilters.chu_de_id='';renderQuestions()">${sOpts}</select>
-        <select onchange="questionFilters.chu_de_id=this.value;renderQuestions()">${tOpts}</select>
-        <select onchange="questionFilters.do_kho=this.value;renderQuestions()">
-          <option value="">-- Độ khó --</option>
-          <option value="de" ${questionFilters.do_kho === 'de' ? 'selected' : ''}>Dễ</option>
-          <option value="trung_binh" ${questionFilters.do_kho === 'trung_binh' ? 'selected' : ''}>Trung bình</option>
-          <option value="kho" ${questionFilters.do_kho === 'kho' ? 'selected' : ''}>Khó</option>
-        </select>
-        <button class="btn btn-sm btn-outline" onclick="questionFilters={};renderQuestions()">↺ Xóa lọc</button>
-      </div>
-    </div>
-    <div class="table-responsive">
-      <table class="table">
-        <thead>
-          <tr><th>Nội dung câu hỏi</th><th>Loại</th><th>Độ khó</th><th>Đáp án</th><th>Thao tác</th></tr>
-        </thead>
-        <tbody>${rows || '<tr><td colspan="5"><div class="empty-state">Không có câu hỏi nào</div></td>'}</tbody>
-      </table>
-    </div>
-  </div>`);
+  `);
 }
 
 function showAddQuestionModal(topics) {
@@ -666,8 +690,8 @@ function showImportModal() {
     if (data.thanh_cong > 0) renderQuestions();
   }, 'Import');
 }
-// ── ĐỀ THI (ĐÃ SỬA: xóa đúng cách, chỉ giữ nút xuất Excel, bỏ nút báo cáo) ──
-// ── ĐỀ THI (ĐÃ SỬA: bỏ cột Điểm đạt, chỉ giữ nút xuất Excel) ──
+
+// ── ĐỀ THI (CÓ NÚT LÀM MỚI) ─────────────────────────────────────────────────
 async function renderExams() {
   loading();
   const [exams, topics] = await Promise.all([getExams(), getTopics()]);
@@ -676,7 +700,6 @@ async function renderExams() {
   const rows = exams.map(e => {
     const isPublished = e.cong_bo === true || e.cong_bo === 1;
     let actionButtons = '';
-    
     if (role === 'hoc_sinh') {
       actionButtons = isPublished 
         ? `<button class="btn btn-sm btn-primary" onclick="startQuiz(${e.id})">▶ Làm bài</button>`
@@ -685,10 +708,8 @@ async function renderExams() {
       actionButtons = `
         <button class="btn btn-sm btn-warning" onclick="publishExamAction(${e.id})">${isPublished ? '🔒 Gỡ' : '🌐 Công bố'}</button>
         <button class="btn btn-sm btn-danger" onclick="deleteExamAction(${e.id})">🗑 Xóa</button>
-        <button class="btn btn-sm btn-success" onclick="downloadWithAuth('export/exam/${e.id}/excel')" title="Xuất đề thi Excel">📄 Xuất</button>
       `;
     }
-
     return `<tr>
       <td style="max-width:300px">
         <strong>${e.tieu_de}</strong><br>
@@ -703,11 +724,12 @@ async function renderExams() {
   setBody(`
     <div class="card">
       <div class="card-header">
-        <h3>📝 Danh sách đề thi</h3>
+        <h3>📝 Danh sách đề thi (${exams.length})</h3>
         ${role !== 'hoc_sinh' ? `
         <div style="display:flex;gap:8px">
           <button class="btn btn-sm btn-outline" onclick="showAutoGenModal(${JSON.stringify(topics).replace(/"/g, '&quot;')})">⚡ Sinh tự động</button>
           <button class="btn btn-sm btn-primary" onclick="showCreateExamModal()">+ Tạo đề</button>
+          <button class="btn btn-sm btn-secondary" onclick="renderExams()" title="Làm mới">🔄 Làm mới</button>
         </div>` : ''}
       </div>
       <div class="table-responsive">
@@ -716,15 +738,163 @@ async function renderExams() {
             <tr><th>Đề thi</th><th>Thời gian</th><th>Trạng thái</th><th>Thao tác</th></tr>
           </thead>
           <tbody>
-            ${rows || '<tr><td colspan="4" class="text-center">Chưa có đề thi</td>'}</tbody>
+            ${rows || '<tr><td colspan="4" class="text-center">Chưa có đề thi</td></tr>'}
+          </tbody>
         </table>
       </div>
     </div>
   `);
 }
 
+async function showCreateExamModal() {
+  const allQuestions = await getQuestions({ an_hien: true, limit: 1000 });
+  tempQuestionList = [];
+
+  const questionsHtml = allQuestions.map(q => `
+    <div class="select-question-item" data-id="${q.id}" data-noi-dung="${q.noi_dung.replace(/"/g, '&quot;')}">
+      <input type="checkbox" class="question-checkbox" value="${q.id}">
+      <strong>${q.noi_dung.substring(0, 100)}${q.noi_dung.length > 100 ? '...' : ''}</strong>
+      <br><small>Chủ đề: ${q.chu_de_id} | Độ khó: ${q.do_kho}</small>
+    </div>
+  `).join('');
+
+  const modalBody = `
+    <div class="form-group"><label>Tiêu đề</label><input id="e-tieude" class="form-control" placeholder="Nhập tiêu đề đề thi"></div>
+    <div class="form-group"><label>Mô tả</label><textarea id="e-mota" rows="2" class="form-control" placeholder="Mô tả (nếu có)"></textarea></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Thời gian (phút)</label><input type="number" id="e-thoigian" value="30" class="form-control"></div>
+      <div class="form-group"><label>Điểm đạt</label><input type="number" id="e-diemdai" value="5" step="0.5" class="form-control"></div>
+    </div>
+    <hr>
+    <div class="form-group">
+      <label>Chọn câu hỏi cho đề thi</label>
+      <div style="max-height:300px; overflow-y:auto; border:1px solid #ccc; padding:8px; border-radius:6px;">
+        ${questionsHtml}
+      </div>
+      <div class="mt-2"><button type="button" id="btn-select-all" class="btn btn-sm btn-outline">Chọn tất cả</button>
+      <button type="button" id="btn-clear-all" class="btn btn-sm btn-outline">Bỏ chọn tất cả</button></div>
+    </div>
+    <div class="form-group">
+      <label>Câu hỏi đã chọn (<span id="selected-count">0</span>)</label>
+      <div id="selected-questions-list" style="max-height:150px; overflow-y:auto; border:1px solid #eee; padding:6px; border-radius:4px; background:#f9f9f9;">
+        <em class="text-muted">Chưa có câu hỏi nào được chọn</em>
+      </div>
+    </div>
+  `;
+
+  showModal('📝 Tạo đề thi thủ công', modalBody, async () => {
+    const tieu_de = document.getElementById('e-tieude').value.trim();
+    const mo_ta = document.getElementById('e-mota').value.trim();
+    const thoi_gian_lam_bai = parseInt(document.getElementById('e-thoigian').value);
+    const diem_dat = parseFloat(document.getElementById('e-diemdai').value);
+    if (!tieu_de) throw new Error('Vui lòng nhập tiêu đề đề thi');
+    if (thoi_gian_lam_bai < 1) throw new Error('Thời gian phải >= 1 phút');
+    if (tempQuestionList.length === 0) throw new Error('Vui lòng chọn ít nhất 1 câu hỏi cho đề thi');
+    const danh_sach_cau_hoi = tempQuestionList.map((q, idx) => ({
+      cau_hoi_id: q.id,
+      thu_tu: idx + 1,
+      diem_so: q.diem_so || 1.0
+    }));
+    await createExam({ tieu_de, mo_ta: mo_ta || null, thoi_gian_lam_bai, diem_dat, danh_sach_cau_hoi });
+    closeModal(); renderExams();
+    alert('✅ Đã tạo đề thi thành công!');
+  }, 'Tạo đề');
+
+  setTimeout(() => {
+    const checkboxes = document.querySelectorAll('.question-checkbox');
+    const selectedDiv = document.getElementById('selected-questions-list');
+    const selectedCountSpan = document.getElementById('selected-count');
+    const btnSelectAll = document.getElementById('btn-select-all');
+    const btnClearAll = document.getElementById('btn-clear-all');
+
+    function updateSelectedList() {
+      const selectedIds = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+      tempQuestionList = [];
+      selectedIds.forEach(id => {
+        const qDiv = document.querySelector(`.select-question-item[data-id="${id}"]`);
+        const noiDung = qDiv.getAttribute('data-noi-dung');
+        tempQuestionList.push({ id: parseInt(id), noi_dung: noiDung, diem_so: 1.0 });
+      });
+      selectedCountSpan.innerText = tempQuestionList.length;
+      if (tempQuestionList.length === 0) {
+        selectedDiv.innerHTML = '<em class="text-muted">Chưa có câu hỏi nào được chọn</em>';
+      } else {
+        selectedDiv.innerHTML = tempQuestionList.map((q, idx) => `
+          <div style="margin-bottom:6px; padding:4px; background:white; border-radius:4px;">
+            <strong>${idx+1}.</strong> ${q.noi_dung.substring(0, 80)}...
+            <div style="display:inline-block; margin-left:10px;">
+              <label style="font-size:12px;">Điểm: </label>
+              <input type="number" step="0.5" min="0.5" value="${q.diem_so}" style="width:60px;" class="score-input" data-id="${q.id}">
+            </div>
+            <button type="button" class="btn-remove-question" data-id="${q.id}" style="float:right; background:none; border:none; color:red; cursor:pointer;">✖</button>
+          </div>
+        `).join('');
+        document.querySelectorAll('.score-input').forEach(inp => {
+          inp.addEventListener('change', (e) => {
+            const id = parseInt(inp.getAttribute('data-id'));
+            let newScore = parseFloat(inp.value);
+            if (isNaN(newScore) || newScore < 0.5) newScore = 1.0;
+            const idx = tempQuestionList.findIndex(q => q.id === id);
+            if (idx !== -1) tempQuestionList[idx].diem_so = newScore;
+            inp.value = newScore;
+          });
+        });
+        document.querySelectorAll('.btn-remove-question').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const id = parseInt(btn.getAttribute('data-id'));
+            const checkbox = document.querySelector(`.question-checkbox[value="${id}"]`);
+            if (checkbox) checkbox.checked = false;
+            updateSelectedList();
+          });
+        });
+      }
+    }
+
+    checkboxes.forEach(cb => cb.addEventListener('change', updateSelectedList));
+    if (btnSelectAll) btnSelectAll.addEventListener('click', () => { checkboxes.forEach(cb => cb.checked = true); updateSelectedList(); });
+    if (btnClearAll) btnClearAll.addEventListener('click', () => { checkboxes.forEach(cb => cb.checked = false); updateSelectedList(); });
+    updateSelectedList();
+  }, 100);
+}
+
+function showAutoGenModal(topics) {
+  const tOpts = topics.map(t => `<option value="${t.id}">${t.ten_chu_de}</option>`).join('');
+  showModal('⚡ Tự động sinh đề', `
+    <div class="form-group"><label>Tiêu đề</label><input id="ag-tieude"></div>
+    <div class="form-group"><label>Chủ đề</label><select id="ag-chude">${tOpts}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Số câu</label><input type="number" id="ag-socau" value="5" min="1" max="50"></div>
+      <div class="form-group"><label>Thời gian (phút)</label><input type="number" id="ag-thoigian" value="15" min="1"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Độ khó (tùy chọn)</label>
+        <select id="ag-dokho"><option value="">Tất cả</option><option value="de">Dễ</option><option value="trung_binh">Trung bình</option><option value="kho">Khó</option></select>
+      </div>
+      <div class="form-group"><label>Điểm/câu</label><input type="number" id="ag-diemcau" value="2" step="0.5" min="0.5"></div>
+    </div>
+  `, async () => {
+    const p = {
+      tieu_de: document.getElementById('ag-tieude').value.trim(),
+      chu_de_id: parseInt(document.getElementById('ag-chude').value),
+      so_luong_cau_hoi: parseInt(document.getElementById('ag-socau').value),
+      thoi_gian_lam_bai: parseInt(document.getElementById('ag-thoigian').value),
+      diem_moi_cau: parseFloat(document.getElementById('ag-diemcau').value),
+      diem_dat: 5.0,
+    };
+    const dk = document.getElementById('ag-dokho').value;
+    if (dk) p.do_kho = dk;
+    try {
+      const result = await autoGenerateExam(p);
+      alert(`Đã tạo đề "${result.tieu_de}" thành công với ${p.so_luong_cau_hoi} câu hỏi!`);
+      closeModal(); renderExams();
+    } catch (err) {
+      alert('Lỗi sinh đề: ' + err.message);
+    }
+  });
+}
+
 async function deleteExamAction(id) {
-  if (!confirm('Bạn có chắc chắn muốn xóa đề thi này? Hành động không thể hoàn tác.')) return;
+  if (!confirm('Bạn có chắc chắn muốn xóa đề thi này?')) return;
   try {
     await deleteExam(id);
     renderExams();
@@ -743,72 +913,6 @@ async function publishExamAction(id) {
   }
 }
 
-// Các hàm showCreateExamModal, showAutoGenModal, showExamReport (nếu có) giữ nguyên
-// Nhưng nếu có hàm showExamReport, bạn có thể xóa nó hoặc giữ (không dùng nữa).
-
-function showCreateExamModal() {
-  showModal('Tạo đề thi mới', `
-    <div class="form-group"><label>Tiêu đề</label><input id="e-tieude"></div>
-    <div class="form-group"><label>Mô tả</label><textarea id="e-mota"></textarea></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div class="form-group"><label>Thời gian (phút)</label><input type="number" id="e-thoigian" value="30"></div>
-      <div class="form-group"><label>Điểm đạt</label><input type="number" id="e-diemdai" value="5" step="0.5"></div>
-    </div>
-  `, async () => {
-    await createExam({
-      tieu_de: document.getElementById('e-tieude').value.trim(),
-      mo_ta: document.getElementById('e-mota').value.trim(),
-      thoi_gian_lam_bai: parseInt(document.getElementById('e-thoigian').value),
-      diem_dat: parseFloat(document.getElementById('e-diemdai').value),
-      danh_sach_cau_hoi: [],
-    });
-    closeModal(); renderExams();
-  });
-}
-
-function showAutoGenModal(topics) {
-  const tOpts = topics.map(t => `<option value="${t.id}">${t.ten_chu_de}</option>`).join('');
-  showModal('⚡ Tự động sinh đề', `
-    <div class="form-group"><label>Tiêu đề</label><input id="ag-tieude"></div>
-    <div class="form-group"><label>Chủ đề</label><select id="ag-chude">${tOpts}</select></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div class="form-group"><label>Số câu</label><input type="number" id="ag-socau" value="5"></div>
-      <div class="form-group"><label>Thời gian</label><input type="number" id="ag-thoigian" value="15"></div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div class="form-group"><label>Độ khó</label>
-        <select id="ag-dokho"><option value="">Tất cả</option><option value="de">Dễ</option><option value="trung_binh">Trung bình</option><option value="kho">Khó</option></select>
-      </div>
-      <div class="form-group"><label>Điểm/câu</label><input type="number" id="ag-diemcau" value="2" step="0.5"></div>
-    </div>
-  `, async () => {
-    const p = {
-      tieu_de: document.getElementById('ag-tieude').value.trim(),
-      chu_de_id: parseInt(document.getElementById('ag-chude').value),
-      so_luong_cau_hoi: parseInt(document.getElementById('ag-socau').value),
-      thoi_gian_lam_bai: parseInt(document.getElementById('ag-thoigian').value),
-      diem_moi_cau: parseFloat(document.getElementById('ag-diemcau').value),
-      diem_dat: 5.0,
-    };
-    const dk = document.getElementById('ag-dokho').value;
-    if (dk) p.do_kho = dk;
-    await autoGenerateExam(p);
-    closeModal(); renderExams();
-  });
-}
-
-async function showExamReport(id) {
-  const d = await getExamReport(id);
-  showModal(`📊 ${d.tieu_de}`, `
-    <div class="stats-grid" style="grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px">
-      <div class="stat-card"><div class="stat-icon blue">👥</div><div class="stat-info"><strong>${d.tong_luot_thi}</strong><span>Lượt thi</span></div></div>
-      <div class="stat-card"><div class="stat-icon green">⭐</div><div class="stat-info"><strong>${d.diem_trung_binh ?? '–'}</strong><span>Điểm TB</span></div></div>
-      <div class="stat-card"><div class="stat-icon yellow">✅</div><div class="stat-info"><strong>${d.ty_le_dat != null ? d.ty_le_dat + '%' : '–'}</strong><span>Tỷ lệ đạt</span></div></div>
-    </div>
-    ${d.tong_luot_thi === 0 ? '<div class="alert alert-info">Chưa có học sinh nào làm bài.</div>' : ''}
-  `, null, 'Đóng');
-}
-
 // ── LỊCH SỬ ──────────────────────────────────────────────────────────────────
 async function renderMyHistory() {
   loading();
@@ -820,68 +924,31 @@ async function renderMyHistory() {
     <td><span class="badge ${h.ket_qua === 'Đạt' ? 'badge-green' : 'badge-red'}">${h.ket_qua}</span></td>
   </tr>`).join('');
   setBody(`<div class="card"><div class="card-header"><h3>📊 Lịch sử làm bài</h3></div>
-    <div class="table-responsive">
-      <table class="table">
-        <thead><tr><th>Đề thi</th><th>Thời gian</th><th>Điểm</th><th>Kết quả</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="4">Chưa có lần thi nào</td>'}</tbody>
-      </table>
-    </div>
-  </div>`);
+    <div class="table-responsive"><table class="table"><thead><tr><th>Đề thi</th><th>Thời gian</th><th>Điểm</th><th>Kết quả</th></tr></thead>
+    <tbody>${rows || '<td><td colspan="4">Chưa có lần thi nào</td></tr>'}</tbody></table></div></div>`);
 }
 
-// ── BÁO CÁO (ĐÃ SỬA LỖI HIỂN THỊ) ──────────────────────────────────────────
 async function renderReports() {
   loading();
   const exams = await getExams();
-  
-  const rows = exams.map(e => {
-    const statusClass = e.cong_bo ? 'badge-green' : 'badge-gray';
-    const statusText = e.cong_bo ? 'Công bố' : 'Nháp';
-    return `<tr>
-      <td><strong>${e.tieu_de}</strong><br><small class="text-muted">${e.mo_ta || ''}</small></td>
-      <td><span class="badge ${statusClass}">${statusText}</span></td>
-      <td><button class="btn btn-sm btn-outline" onclick="loadExamReport(${e.id})">📊 Xem</button></td>
-    </tr>`;
-  }).join('');
-
-  setBody(`
-    <div class="card">
-      <div class="card-header">
-        <h3>📈 Chọn đề thi để xem báo cáo</h3>
-      </div>
-      <div class="table-responsive">
-        <table class="table">
-          <thead>
-            <tr><th>Đề thi</th><th>Trạng thái</th><th>Báo cáo</th></tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="3" class="text-center text-muted">Chưa có đề thi</td>'}</tbody>
-        </table>
-      </div>
-    </div>
-    <div id="report-detail"></div>
-  `);
+  const rows = exams.map(e => `<tr>
+    <td><strong>${e.tieu_de}</strong><br><small>${e.mo_ta || ''}</small></td>
+    <td><span class="badge ${e.cong_bo ? 'badge-green' : 'badge-gray'}">${e.cong_bo ? 'Công bố' : 'Nháp'}</span></td>
+    <td><button class="btn btn-sm btn-outline" onclick="loadExamReport(${e.id})">📊 Xem</button></td>
+  </tr>`).join('');
+  setBody(`<div class="card"><div class="card-header"><h3>📈 Chọn đề thi để xem báo cáo</h3></div>
+    <div class="table-responsive"><table class="table"><thead><tr><th>Đề thi</th><th>Trạng thái</th><th>Báo cáo</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="3">Chưa có đề thi</td></tr>'}</tbody></table></div>
+    <div id="report-detail"></div></div>`);
 }
 
 async function loadExamReport(id) {
   const d = await getExamReport(id);
-  const statsHtml = `
-    <div class="stats-grid" style="grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px">
-      <div class="stat-card">
-        <div class="stat-icon blue">👥</div>
-        <div class="stat-info"><strong>${d.tong_luot_thi}</strong><span>Lượt thi</span></div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon green">⭐</div>
-        <div class="stat-info"><strong>${d.diem_trung_binh ?? '–'}</strong><span>Điểm TB</span></div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon yellow">✅</div>
-        <div class="stat-info"><strong>${d.ty_le_dat != null ? d.ty_le_dat + '%' : '–'}</strong><span>Tỷ lệ đạt</span></div>
-      </div>
-    </div>
-    ${d.tong_luot_thi === 0 ? '<div class="alert alert-info">Chưa có học sinh nào làm bài.</div>' : ''}
-  `;
+  const statsHtml = `<div class="stats-grid" style="grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px">
+    <div class="stat-card"><div class="stat-icon blue">👥</div><div class="stat-info"><strong>${d.tong_luot_thi}</strong><span>Lượt thi</span></div></div>
+    <div class="stat-card"><div class="stat-icon green">⭐</div><div class="stat-info"><strong>${d.diem_trung_binh ?? '–'}</strong><span>Điểm TB</span></div></div>
+    <div class="stat-card"><div class="stat-icon yellow">✅</div><div class="stat-info"><strong>${d.ty_le_dat != null ? d.ty_le_dat + '%' : '–'}</strong><span>Tỷ lệ đạt</span></div></div>
+  </div>${d.tong_luot_thi === 0 ? '<div class="alert alert-info">Chưa có học sinh nào làm bài.</div>' : ''}`;
   document.getElementById('report-detail').innerHTML = `<div class="card"><div class="card-header"><h3>📊 ${d.tieu_de}</h3></div><div class="card-body">${statsHtml}</div></div>`;
 }
 
@@ -894,12 +961,12 @@ async function renderUsers() {
     const isMe = currentUser && u.id === currentUser.id;
     const roleText = roleMap[u.vai_tro] || u.vai_tro;
     return `<tr>
-      <td>${index + 1}</td>
+      <td class="text-center">${index + 1}</td>
       <td><strong>${u.ten_dang_nhap || '???'}</strong>${isMe ? ' <span class="badge badge-blue">Bạn</span>' : ''}</td>
       <td>${u.ho_ten || '???'}</td>
       <td><span class="badge badge-blue">${roleText}</span></td>
       <td><span class="badge ${u.kich_hoat ? 'badge-green' : 'badge-red'}">${u.kich_hoat ? 'Hoạt động' : 'Đã khóa'}</span></td>
-      <td>
+      <td class="action-buttons">
         ${!isMe ? `<button class="btn btn-sm ${u.kich_hoat ? 'btn-warning' : 'btn-success'}" onclick="toggleActiveAction(${u.id})">${u.kich_hoat ? '🔒 Khóa' : '🔓 Mở'}</button>
         <button class="btn btn-sm btn-danger" onclick="deleteUserAction(${u.id},'${u.ten_dang_nhap}')">🗑 Xóa</button>` : '<span class="text-muted">–</span>'}
       </td>
@@ -908,121 +975,52 @@ async function renderUsers() {
 
   setBody(`<div class="card"><div class="card-header"><h3>👥 Người dùng (${users.length})</h3>
     <button class="btn btn-sm btn-primary" onclick="showCreateUserModal()">+ Tạo tài khoản</button></div>
-    <div class="table-responsive">
-      <table class="table">
-        <thead><tr><th>STT</th><th>Tên đăng nhập</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6">Chưa có người dùng</td>'}</tbody>
-      </table>
-    </div>
-  </div>`);
+    <div class="table-responsive"><table class="table"><thead><tr><th>STT</th><th>Tên đăng nhập</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="6">Chưa có người dùng</td></tr>'}</tbody></table></div></div>`);
 }
 
 async function toggleActiveAction(id) {
-  try {
-    await toggleUserActive(id);
-    renderUsers();
-  } catch (err) {
-    alert('Lỗi: ' + err.message);
-  }
+  try { await toggleUserActive(id); renderUsers(); } catch (err) { alert('Lỗi: ' + err.message); }
 }
-
 async function deleteUserAction(id, ten) {
-  if (!confirm(`Xóa tài khoản "${ten}"? Hành động này không thể hoàn tác.`)) return;
-  try {
-    await deleteUser(id);
-    renderUsers();
-  } catch (err) {
-    alert('Lỗi: ' + err.message);
-  }
+  if (!confirm(`Xóa tài khoản "${ten}"? Hành động không thể hoàn tác.`)) return;
+  try { await deleteUser(id); renderUsers(); } catch (err) { alert('Lỗi: ' + err.message); }
 }
-
 function showCreateUserModal() {
   showModal('Tạo tài khoản mới', `
     <div class="form-group"><label>Họ tên</label><input id="u-hoten"></div>
     <div class="form-group"><label>Tên đăng nhập</label><input id="u-tendangnhap"></div>
     <div class="form-group"><label>Mật khẩu</label><input type="password" id="u-matkhau" placeholder="Ít nhất 6 ký tự"></div>
-    <div class="form-group"><label>Vai trò</label>
-      <select id="u-vaitro"><option value="hoc_sinh">Học sinh</option><option value="giao_vien">Giáo viên</option><option value="admin">Admin</option></select>
-    </div>
+    <div class="form-group"><label>Vai trò</label><select id="u-vaitro"><option value="hoc_sinh">Học sinh</option><option value="giao_vien">Giáo viên</option><option value="admin">Admin</option></select></div>
   `, async () => {
-    const p = {
-      ho_ten: document.getElementById('u-hoten').value.trim(),
-      ten_dang_nhap: document.getElementById('u-tendangnhap').value.trim(),
-      mat_khau: document.getElementById('u-matkhau').value,
-      vai_tro: document.getElementById('u-vaitro').value,
-    };
+    const p = { ho_ten: document.getElementById('u-hoten').value.trim(), ten_dang_nhap: document.getElementById('u-tendangnhap').value.trim(), mat_khau: document.getElementById('u-matkhau').value, vai_tro: document.getElementById('u-vaitro').value };
     if (!p.ho_ten || !p.ten_dang_nhap || !p.mat_khau) throw new Error('Điền đầy đủ thông tin');
     if (p.mat_khau.length < 6) throw new Error('Mật khẩu tối thiểu 6 ký tự');
-    await register(p);
-    closeModal();
-    renderUsers();
+    await register(p); closeModal(); renderUsers();
   }, 'Tạo tài khoản');
 }
 
-// ── ĐỔI MẬT KHẨU ─────────────────────────────────────────────────────────────
 function showChangePasswordModal() {
-  showModal('🔒 Đổi mật khẩu', `
-    <div class="form-group"><label>Mật khẩu cũ</label><input type="password" id="cp-cu"></div>
+  showModal('🔒 Đổi mật khẩu', `<div class="form-group"><label>Mật khẩu cũ</label><input type="password" id="cp-cu"></div>
     <div class="form-group"><label>Mật khẩu mới</label><input type="password" id="cp-moi" placeholder="Ít nhất 6 ký tự"></div>
-    <div class="form-group"><label>Xác nhận</label><input type="password" id="cp-xn"></div>
-  `, async () => {
-    const cu = document.getElementById('cp-cu').value;
-    const moi = document.getElementById('cp-moi').value;
-    const xn = document.getElementById('cp-xn').value;
+    <div class="form-group"><label>Xác nhận</label><input type="password" id="cp-xn"></div>`, async () => {
+    const cu = document.getElementById('cp-cu').value, moi = document.getElementById('cp-moi').value, xn = document.getElementById('cp-xn').value;
     if (!cu || !moi) throw new Error('Điền đầy đủ');
     if (moi.length < 6) throw new Error('Mật khẩu mới phải 6+ ký tự');
     if (moi !== xn) throw new Error('Mật khẩu xác nhận không khớp');
-    await changePassword(cu, moi);
-    closeModal();
-    alert('Đổi mật khẩu thành công! Vui lòng đăng nhập lại.');
-    logout();
+    await changePassword(cu, moi); closeModal(); alert('Đổi mật khẩu thành công! Vui lòng đăng nhập lại.'); logout();
   });
 }
 
-// ── IMPORT EXCEL CÂU HỎI ──────────────────────────────────────────────────────
-function showImportModal() {
-  showModal('📥 Import câu hỏi từ Excel', `
-    <div class="alert alert-info"><a href="${downloadTemplate()}" target="_blank" style="color:var(--primary)">⬇ Tải file mẫu</a></div>
-    <div class="form-group"><input type="file" id="import-file" accept=".xlsx,.xls"></div>
-    <div id="import-result"></div>
-  `, async () => {
-    const f = document.getElementById('import-file').files[0];
-    if (!f) throw new Error('Chọn file');
-    const fd = new FormData();
-    fd.append('file', f);
-    const res = await fetch('http://127.0.0.1:8000/import/questions/excel', {
-      method: 'POST', headers: { 'Authorization': `Bearer ${getToken()}` }, body: fd,
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail);
-    document.getElementById('import-result').innerHTML = `<div class="alert alert-success">✅ Thành công: ${data.thanh_cong} | Lỗi: ${data.that_bai}</div>`;
-    if (data.thanh_cong > 0) renderQuestions();
-  });
-}
-
-// ── MODAL ─────────────────────────────────────────────────────────────────────
 function showModal(title, bodyHtml, onConfirm, confirmLabel = 'Lưu', cancelLabel = 'Hủy') {
   document.getElementById('modal-overlay')?.remove();
-  const div = document.createElement('div');
-  div.id = 'modal-overlay';
-  div.className = 'modal-overlay';
-  div.innerHTML = `<div class="modal">
-    <div class="modal-header"><h3>${title}</h3><button class="btn-close" onclick="closeModal()">×</button></div>
-    <div class="modal-body">${bodyHtml}</div>
-    <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal()">${cancelLabel}</button>
-      ${onConfirm ? `<button class="btn btn-primary" id="modal-confirm">${confirmLabel}</button>` : ''}
-    </div>
-  </div>`;
+  const div = document.createElement('div'); div.id = 'modal-overlay'; div.className = 'modal-overlay';
+  div.innerHTML = `<div class="modal"><div class="modal-header"><h3>${title}</h3><button class="btn-close" onclick="closeModal()">×</button></div><div class="modal-body">${bodyHtml}</div><div class="modal-footer"><button class="btn btn-outline" onclick="closeModal()">${cancelLabel}</button>${onConfirm ? `<button class="btn btn-primary" id="modal-confirm">${confirmLabel}</button>` : ''}</div></div>`;
   document.body.appendChild(div);
   if (onConfirm) {
     document.getElementById('modal-confirm').onclick = async () => {
-      const btn = document.getElementById('modal-confirm');
-      btn.disabled = true; btn.textContent = 'Đang xử lý...';
-      try { await onConfirm(); } catch (err) {
-        document.querySelector('.modal-body').insertAdjacentHTML('beforeend', `<div class="alert alert-error">${err.message}</div>`);
-        btn.disabled = false; btn.textContent = confirmLabel;
-      }
+      const btn = document.getElementById('modal-confirm'); btn.disabled = true; btn.textContent = 'Đang xử lý...';
+      try { await onConfirm(); } catch (err) { document.querySelector('.modal-body').insertAdjacentHTML('beforeend', `<div class="alert alert-error">${err.message}</div>`); btn.disabled = false; btn.textContent = confirmLabel; }
     };
   }
 }
